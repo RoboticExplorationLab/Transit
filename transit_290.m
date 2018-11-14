@@ -55,6 +55,9 @@ for jj = 1:length(r_enu)
 end
 
 
+% Lets use less points and see how accurate ...
+viz = viz(100:250);
+
 % Measurement function
 X = r_ecef(:,viz);
 V = v_ecef(:,viz);
