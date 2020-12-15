@@ -7,6 +7,11 @@
 close all
 clear all
 
+%Sim Parameters
+Vtag_ms = 1.0; %Tag velocity in meters/sec
+tag_heading = 2*pi*rand(); %Tag heading in radians
+freq_noise_hz = 1.0; %1-sigma white noise added to doppler measurements
+
 % =============== Constants ===============
 % Earth Parameters 
 rE = 6378;          % [km]       Earth radius
@@ -49,8 +54,8 @@ oe = [a; e; i; Om; w; M];
 [r_ecef,v_ecef,r_enu,AZ,EL,X0tag,ENU] = SatellitePropagator(oe,epoch,mu,tvec+epoch,rE,GC_lam,GC_phi);
 
 % Tag motion
-tag_heading = 2*pi*rand();
-Vtag = 0e-3*(sin(tag_heading)*ENU(:,1) + cos(tag_heading)*ENU(:,2)); %km/s
+%heading_deg = rad2deg(tag_heading)
+Vtag = Vtag_ms*1e-3*(sin(tag_heading)*ENU(:,1) + cos(tag_heading)*ENU(:,2)); %km/s
 Xtag = zeros(size(r_ecef));
 Xtag(:,1) = X0tag;
 for k = 2:length(Xtag)
@@ -104,7 +109,7 @@ H2 = @(P) f0*(1+-(1000*H(P))/c);  % convert velocity from km/s to m/s
 
 % Doppler Shift
 freq = f0*(1+-(1000*rdot(viz))/c); %in MHz
-noise = 1e-5*randn(length(rdot(viz)),1); % noise in MHz
+noise = freq_noise_hz*1e-6*randn(length(rdot(viz)),1); % sampled noise in MHz
 fdata = freq + noise;
 
 J2 = @(P) H2(P) - fdata;
