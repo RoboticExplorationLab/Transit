@@ -1,17 +1,53 @@
-% Shawn Swist
-% AA 290 - Manchester
+function Err_mag=PositionEstimator(TagVelocity,TagHeading,TagFreqError,TagLat,TagLong)
+% This code estimates the position error of a hypothetical Doppler-based
+% tracking system.
+% Assumptions:
+% 1) The satellite clock and pose are known exactly 
+% 2) It assumes adequate SNR
+% 3) The ERROR SOURCES are only: uncertainty in the velocity vector of the
+% transmitter and uncertainty in the transmitter clock frequency
+% 4) The error in measuring the transmitted signal at the satellite is not
+% modeled
+% 
+% The inputs:
+
+
+
+
+
+% This code works by: 
 %
+% First version by Shawn Swist
+% AA 290 - Manchester
+% Later modified by Manchester and MacCurdy
 
-% initial code for satellite propagation
 
-close all
-clear all
+%Sim Parameters. If any of the inputs are left empty, these are
+%substituted. If ALL inputs are left empty, this function acts like a
+%script and generates plots.
 
-%Sim Parameters
-Vtag_ms = 1.0; %Tag velocity in meters/sec
-tag_heading = 2*pi*rand(); %Tag heading in radians
-freq_noise_hz = 1.0; %1-sigma white noise added to doppler measurements
+%Tag velocity magnitude in meters/sec
+Vtag_ms = 1.0; %default value
+%Tag heading in radians
+tag_heading = 2*pi*rand();  %choose a random heading in radians
+%1-sigma white noise added to doppler measurements. This is the 1-sigma
+%frequency extent of random frequency noise added to the Doppler
+%measurements. This is assumed to come from noise sources in the tag clock
+%that cause it to deviate from the 
+freq_noise_hz = 1.0; 
+% Tag position
+GClat = 37.426622;
+GClong = -122.173355;
 
+%% Handle Inputs
+if logical(exist('TagVelocity', 'var')) && ~isempty(TagVelocity) Vtag_ms=TagVelocity; end
+if logical(exist('TagHeading', 'var')) && ~isempty(TagHeading) tag_heading=TagHeading; end
+if logical(exist('TagFreqError', 'var')) && ~isempty(TagFreqError) freq_noise_hz=TagFreqError; end
+if logical(exist('TagLat', 'var')) && ~isempty(TagLat) GClat=TagLat; end
+if logical(exist('TagLong', 'var')) && ~isempty(TagLong) GClong=TagLong; end
+arg_cnt=nargin;
+
+%%
 % =============== Constants ===============
 % Earth Parameters 
 rE = 6378;          % [km]       Earth radius
@@ -22,21 +58,18 @@ mu = 3.986e5;       % [km^3/s^2] Earth gravational parameter
 f0 = 400;           % [MHz]      Frequency
 c = 299792458;      % [m/s]      Speed of light
 
-
 % Time
 epoch = 58398;      % [MJD] 10/7/2018
 tvec = linspace(.0215,.03,100);
 dt = 86400*(tvec(2)-tvec(1)); %seconds
 
-% Tag position
-GClat = 37.426622;
-GClong = -122.173355;
+
 % TURN THESE INTO GEODETIC LAT/LONG! ????
 GC_phi = 37.6123;
 GC_phi = GClat;
 GC_lam = GClong;
 
-% Define satellite orbiatl elements
+% Define satellite orbital elements
 a = rE + 500;   % [km]  Semi-major axis
 e = 0.01;       %  []   Eccentricity
 i = 89;         % [deg] Inclination
@@ -54,14 +87,12 @@ oe = [a; e; i; Om; w; M];
 [r_ecef,v_ecef,r_enu,AZ,EL,X0tag,ENU] = SatellitePropagator(oe,epoch,mu,tvec+epoch,rE,GC_lam,GC_phi);
 
 % Tag motion
-%heading_deg = rad2deg(tag_heading)
 Vtag = Vtag_ms*1e-3*(sin(tag_heading)*ENU(:,1) + cos(tag_heading)*ENU(:,2)); %km/s
 Xtag = zeros(size(r_ecef));
 Xtag(:,1) = X0tag;
 for k = 2:length(Xtag)
     Xtag(:,k) = Xtag(:,k-1) + Vtag*dt;
 end
-%norm(Vtag*dt*length(viz))
 
 % Find When Satellite is visible
 viz = find(EL>10);
@@ -121,7 +152,14 @@ pos2 = lsqnonlin(J2,[rE;0;0],[],[],opts);
 Elat2 = asind(pos2(3)/norm(pos2));
 Elong2 = rad2deg(atan2(pos2(2),pos2(1)));
 
+err = 1000*(pos2-mean(Xtag,2)); %Zac, what's up with this 1000? Is this 
+% meters or KM? The "disp" below indicates meters, but this 1000 makes it
+% seem like km...
+Err_mag = norm(err);
+
 %% PLOTS
+
+if arg_cnt<1
 % plot the estimated locataion vs true location
 figure; hold all
 grid on
@@ -172,6 +210,6 @@ ylabel('Doppler (kHz)');
 title('Frequency obseved by satellite');
 legend('True','Observed')
 
-disp('Error (meters):');
-err = 1000*(pos2-mean(Xtag,2));
-norm(err)
+disp(['Error (meters): ',num2str(Err_mag)]);
+
+end
