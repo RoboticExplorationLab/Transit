@@ -1,4 +1,4 @@
-function [r_ecef,v_ecef,r_enu,AZ,EL,Rgs] = SatellitePropagator(oe,epoch,mu,t_vec,rCB,GClong,GClat)
+function [r_ecef,v_ecef,r_enu,AZ,EL,Rgs,ENU] = SatellitePropagator(oe,epoch,mu,t_vec,rCB,GClong,GClat)
 %[r_ecef,r_enu,AZ,EL] = SatPropagator(oe,epoch,mu,t_vec,rCB,GClong,GClat)
 %Propagate a satellite's orbit for a given period of time. Provides
 %Earth-Centered, Earth-Fixed coordinates, and from the ground station, the
@@ -49,7 +49,7 @@ Ehat = [-sind(GClong);cosd(GClong);0];
 Nhat = [-sind(GClat)*cosd(GClong);-sind(GClat)*sind(GClong);cosd(GClat)];
 Uhat = [cosd(GClat)*cosd(GClong);cosd(GClat)*sind(GClong);sind(GClat)];
 
-Rxyzenu = [Ehat Nhat Uhat]';
+ENU = [Ehat Nhat Uhat]';
 Rgs = rCB*[cosd(GClat)*cosd(GClong);cosd(GClat)*sind(GClong);sind(GClat)];
 
 % Initilize matricies
@@ -68,7 +68,7 @@ for ii = 1:length(t_vec)
     [r_eci, v_eci] = OE2ECI(a, e, i, Om, w, anom, mu);
     r_ecef(:,ii) = rotz(-GMST(ii))*r_eci;
     v_ecef(:,ii) = rotz(-GMST(ii))*v_eci;
-    Rsat = Rxyzenu*(r_ecef(:,ii)-Rgs);
+    Rsat = ENU*(r_ecef(:,ii)-Rgs);
     re = Rsat(1,:);
     rn = Rsat(2,:);
     ru = Rsat(3,:);
