@@ -1,6 +1,7 @@
 function Err_mag=PositionEstimator(TagVelocity,TagHeading,TagFreqError,TagLat,TagLong)
-% This code estimates the position error of a hypothetical Doppler-based
-% tracking system.
+% This code estimates the position error of a transmitter using a 
+% hypothetical Doppler-based tracking system.
+% 
 % Assumptions:
 % 1) The satellite clock and pose are known exactly 
 % 2) It assumes adequate SNR
@@ -10,15 +11,35 @@ function Err_mag=PositionEstimator(TagVelocity,TagHeading,TagFreqError,TagLat,Ta
 % modeled
 % 
 % The inputs:
-
-
-
-
-
-% This code works by: 
+% TagVelocity - Tag velocity magnitude in meters/sec
+% TagHeading - Tag heading in radians
+% TagFreqError - 1-sigma value of white noise added to doppler measurements. This is 
+% the 1-sigma frequency extent of random frequency noise added to the Doppler
+% measurements. This is assumed to come from noise sources in the tag clock
+% that cause it to deviate from the set point
+% TagLat and TagLong are the true positions of the tag
+% 
+% This code works by: Simulating the motion of a satellite (SV) with given
+% orbital parameters. It uses a prescribed tag position and finds the
+% subset of SV locations in earth-centered earth-fixed coordinates
+% that are in view of the tag (when SV is at least 10 deg above horizon). 
+% For these positions, the range and velocity between the tag and SV are
+% computed. These are the "true" ranges and relative velocities. The dot
+% product between these tuples yields the rate of approach/retreat, or the
+% scalar relative velocity that appears in the Doppler computation. With
+% these approach/retreat speeds, we then form a vector of apparent (to the 
+% SV) tag frequencies. We add Gaussian noise to these frequency 
+% "measurements", to account for tag Tx frequency error and SV frequency
+% estimation error. This array of frequency "measurements" form our
+% observables. We then use the equations that describe the approach/retreat
+% speeds and the Doppler shift to create a measurement function (called H2
+% below) for the true Doppler shift, given a single position and the series
+% of known SV positions/velocities. The difference between this 
+% measurement function and the data is minimized in a least-squares sense,
+% yielding an estimate for the tag position.
 %
-% First version by Shawn Swist
-% AA 290 - Manchester
+%
+% First version by Shawn Swist as part of AA 290 taught by Manchester
 % Later modified by Manchester and MacCurdy
 
 
@@ -55,17 +76,18 @@ mu = 3.986e5;       % [km^3/s^2] Earth gravational parameter
 %seed = rng(1);      % Keep the seed the same for randn
 
 % Frequency of tag
-f0 = 400;           % [MHz]      Frequency
+f0 = 400;           % [MHz]      Center Frequency
 c = 299792458;      % [m/s]      Speed of light
 
 % Time
 epoch = 58398;      % [MJD] 10/7/2018
-tvec = linspace(.0215,.03,100);
-dt = 86400*(tvec(2)-tvec(1)); %seconds
+tvec = linspace(.0215,.03,100); %choose a set of times (in MJD) over which 
+    %we'll simulate the motion of the satellite
+dt = 86400*(tvec(2)-tvec(1)); %seconds between simulation steps
 
 
 % TURN THESE INTO GEODETIC LAT/LONG! ????
-GC_phi = 37.6123;
+%GC_phi = 37.6123;
 GC_phi = GClat;
 GC_lam = GClong;
 
@@ -84,9 +106,14 @@ oe = [a; e; i; Om; w; M];
 
 
 % Simulate Satellite motion
+% This finds the ECEF coordinates in km of the satellite given the orbital
+% parameters and a vector of times in MJD. It also gives the tag/transmitter
+% position in ECEF.
 [r_ecef,v_ecef,r_enu,AZ,EL,X0tag,ENU] = SatellitePropagator(oe,epoch,mu,tvec+epoch,rE,GC_lam,GC_phi);
 
 % Tag motion
+% Assume the tag starts from its initial position and moves with constant
+% velocity "Vtag_ms" in the direction prescribed by "tag_heading"
 Vtag = Vtag_ms*1e-3*(sin(tag_heading)*ENU(:,1) + cos(tag_heading)*ENU(:,2)); %km/s
 Xtag = zeros(size(r_ecef));
 Xtag(:,1) = X0tag;
@@ -94,15 +121,23 @@ for k = 2:length(Xtag)
     Xtag(:,k) = Xtag(:,k-1) + Vtag*dt;
 end
 
-% Find When Satellite is visible
+% Find the entries of the satellite motion in which it is visible to the 
+% tag, indicated when the elevation is above 10 degrees
 viz = find(EL>10);
+
+% Now compute 
 rdot = zeros(length(r_ecef),1);
 for jj = 1:length(r_enu)
-    Xsat = r_ecef(:,jj);
-    Vsat = v_ecef(:,jj);
-    R = Xsat-Xtag(:,jj);
-    V = Vsat - Vtag;
-    rdot(jj) = R'*V/sqrt(R'*R);
+    Xsat = r_ecef(:,jj);    %pos of sat, km
+    Vsat = v_ecef(:,jj);    %velocity of sat, km/sec
+    R = Xsat-Xtag(:,jj);    %sat to tag range
+    V = Vsat - Vtag;        %sat to tag relative velocity
+    rdot(jj) = R'*V/sqrt(R'*R); %compute the dot product of the velocity 
+                                %vector with the unit vector pointed along 
+                                %the direction of R. This is the relative
+                                %velocity or rate of approach/retreat that
+                                %appears in the Doppler computations.
+                                %km/sec
 end
 
 
@@ -139,22 +174,31 @@ H2 = @(P) f0*(1+-(1000*H(P))/c);  % convert velocity from km/s to m/s
 
 
 % Doppler Shift
-freq = f0*(1+-(1000*rdot(viz))/c); %in MHz
-noise = freq_noise_hz*1e-6*randn(length(rdot(viz)),1); % sampled noise in MHz
-fdata = freq + noise;
+freq = f0*(1+-(1000*rdot(viz))/c); %Apparent tag freq, in MHz, after Doppler shift
+noise = freq_noise_hz*1e-6*randn(length(rdot(viz)),1); % Add Gaussian noise 
+                        %with a 1-sigma magnitude scaled by "freq_noise_hz"
+        
+fdata = freq + noise;   %Apparent tag freq plus frequency noise, after the 
+                        %Doppler shift. This is our observable "data" with
+                        %which the estimator needs to predict the tag
+                        %location.
 
 J2 = @(P) H2(P) - fdata;
 
-% Nonlinear least squares solver - frequency based
+% Nonlinear least squares solver - frequency based. Find the single
+% position that best explains, in a LS sense, the multiple Doppler measurements
 opts = optimoptions('lsqnonlin','Display','off','OptimalityTolerance',1e-15,'FunctionTolerance',1e-15,'StepTolerance',1e-15);
 pos2 = lsqnonlin(J2,[rE;0;0],[],[],opts);
 
+%pull out the Lat/Long locations of the estimated position, for plotting
 Elat2 = asind(pos2(3)/norm(pos2));
 Elong2 = rad2deg(atan2(pos2(2),pos2(1)));
 
-err = 1000*(pos2-mean(Xtag,2)); %Zac, what's up with this 1000? Is this 
-% meters or KM? The "disp" below indicates meters, but this 1000 makes it
-% seem like km...
+err = 1000*(pos2-mean(Xtag,2)); %compare the difference between the 
+                                %estimated tag position and the mean of the
+                                %prescribed positions (since the tag moves 
+                                %at a constant velocity). Convert from km
+                                %to m to get the true error of our estimate.
 Err_mag = norm(err);
 
 %% PLOTS
